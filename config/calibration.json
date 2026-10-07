@@ -1,0 +1,13 @@
+{
+  "camera": {
+    "device_index": 0,
+    "width": 1280,
+    "height": 720,
+    "fps": 30
+  },
+  "scale_factor": 100.0,
+  "calibration_method": "mediapipe_world_landmarks",
+  "known_height_cm": null,
+  "pixels_per_metric": null,
+  "notes": "scale_factor converts MediaPipe 3D world coordinates (meters) to centimeters (100.0 cm/m)."
+}

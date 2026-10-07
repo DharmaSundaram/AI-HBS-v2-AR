@@ -1,0 +1,11 @@
+{
+  "shoulder": 1.0,
+  "left_upper_arm": 1.0,
+  "right_upper_arm": 1.0,
+  "left_forearm": 1.0,
+  "right_forearm": 1.0,
+  "left_thigh": 1.0,
+  "right_thigh": 1.0,
+  "left_lower_leg": 1.0,
+  "right_lower_leg": 1.0
+}
