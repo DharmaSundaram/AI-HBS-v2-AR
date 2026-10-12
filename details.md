@@ -1,7 +1,7 @@
 # AI-HBS-v2-AR: Complete Technical Specification & Project Details
 
 > **Project Name:** AI Human Body Measurement & Augmented Reality Engine (Version 2)  
-> **Status:** Phase 5 Completed (Silhouette-Constrained 3D Mesh Refinement & Ground-Truth Validation)  
+> **Status:** Phase 6.2 Completed (Real-Time AR Measurement Lines & Labels)  
 > **Notice:** Prototype computer-vision measurement system. Measurements represent approximate anthropometric estimations and are not certified for medical diagnostics.
 
 ---
@@ -260,6 +260,8 @@ AI-HBS-v2-AR/
 │   ├── measurements.py             # 3D Euclidean segment distances & correction factor logic
 │   ├── calibration.py              # Camera parameter manager & metric conversion
 │   ├── stabilizer.py               # 60-frame median buffer & outlier rejection filter
+│   ├── ar_coordinate_mapper.py     # Phase 6.1: Real-time AR coordinate mapper (Normalized -> 2D pixel space)
+│   ├── ar_measurement_overlay.py   # Phase 6.2: Real-time AR measurement lines, CAD ticks & anchored labels
 │   └── visualization.py            # 2D camera HUD, skeleton rendering, progress bar & overlays
 ├── config/
 │   ├── calibration.json            # Camera resolution, FPS, scale factor
@@ -290,6 +292,7 @@ AI-HBS-v2-AR/
 | **`P`** | **Cycle Slicing Plane** | Cycles: `ALL` → `CHEST` → `WAIST` → `HIP` → `ARMS` → `THIGHS` |
 | **`M`** | **Toggle 3D Viewport** | Expands/collapses side-by-side 3D volumetric viewer |
 | **`S`** | **Toggle Skeleton** | Toggles 2D webcam skeleton & 3D inner anatomical rig |
+| **`O`** | **Toggle AR Measurement Overlay** | Toggles Phase 6.1 & 6.2 AR dimension lines, labels, ticks & debug points |
 | **`R`** | **Reset 3D Camera** | Restores default orbit yaw, pitch, zoom, and center |
 | **`V`** | **Developer Validation** | Opens interactive terminal prompt to test ground-truth values |
 | **`+` / `-`** | **Zoom In / Out** | Adjusts virtual 3D camera distance |
@@ -431,10 +434,17 @@ Phase 4: Planar Surface Slicing & Circumference (Completed)
    │
 Phase 5: Silhouette-Constrained Mesh & Validation (Completed)
    │
-   ▼
-Phase 6: Real-Time 2D/3D AR Measurement Overlay (Next)
-   │     • Digital measuring tape projected on camera feed
-   │     • Real-time pose positioning guidance
+Phase 5: Silhouette-Constrained Mesh & Validation (Completed)
+   │
+Phase 6.1: Real-Time AR Coordinate Mapping (Completed)
+   │     • Normalized image landmarks mapped to dynamic camera pixel coordinates
+   │     • 3D metric world space preserved intact for measurements
+   │     • Standard ARPoint data model & real-time debug visualization
+   │
+Phase 6.2: Real-Time AR Measurement Lines & Labels (Completed)
+   │     • CAD-style dimension lines with perpendicular end-cap ticks
+   │     • Anchored glassmorphic metric labels with temporal display smoothing
+   │     • Horizontal AR circumference indicators with live confidence & stability
    ▼
 Phase 7: True Depth Sensor Integration (Hardware Evolution)
    │     • Time-of-Flight (ToF) / LiDAR / Intel RealSense
@@ -443,6 +453,54 @@ Phase 7: True Depth Sensor Integration (Hardware Evolution)
 Phase 8: Unity 3D / ARCore Mobile Deployment
          • Mobile AR measurement app for iOS / Android
          • 3D avatar export (.OBJ / .GLTF) for digital try-on
+```
+
+### Phase 6.2: Real-Time AR Measurement Lines & Labels
+
+- **Status:** COMPLETED
+- **Description:** "The system now renders body measurements directly on the live camera view using anatomically anchored AR measurement lines and labels. Segment measurements and circumference estimates are displayed using the existing stabilized measurement engine and mapped anatomical landmarks."
+
+#### Core AR Visual Subsystems:
+1. **CAD-Style Dimension Lines (`draw_segment_measurement`):**
+   - Connects detected joint pairs (Shoulder width, Upper Arms, Forearms, Thighs, Lower Legs).
+   - Draws perpendicular end-cap ticks (`├──────────────┤`) and endpoint node dots.
+   - Visually distinct vibrant gold/amber color scheme separate from the cyan skeleton.
+2. **Anchored Smoothed Metric Labels (`draw_measurement_label`):**
+   - Outward perpendicular vector projection away from the torso center prevents body occlusion.
+   - Lightweight visual temporal smoothing ($\alpha = 0.35$) ensures jitter-free motion without modifying underlying measurement statistics.
+   - Screen edge clamping (`clamp_text_position`) prevents text clipping outside camera frame boundaries.
+3. **Horizontal AR Circumference Indicators (`draw_circumference_measurement`):**
+   - Renders AR-style horizontal span indicators (`<──────────────>`) anchored at Chest, Waist, and Hip.
+   - Color-coded confidence status indicator (`●` Green for $\ge 80\%$, Orange/Yellow for lower).
+   - Real-time temporal stability percentage badge (e.g., `Stab: 98%`).
+
+### Phase 6.1: Real-Time AR Coordinate Mapping
+
+- **Status:** COMPLETED
+- **Description:** "The system now maps MediaPipe image-space landmarks to real-time camera pixel coordinates while preserving the existing metric 3D world-coordinate measurement pipeline. These mapped coordinates form the foundation for future AR measurement overlays."
+
+#### Coordinate Space Distinction:
+- **Image Space:**  
+  2D camera coordinates $(x_{pixel}, y_{pixel})$ derived from normalized inputs $(x, y) \in [0.0, 1.0]$ via $x_{pixel} = \text{int}(x \times W)$, $y_{pixel} = \text{int}(y \times H)$ safely clamped to $[0, W-1] \times [0, H-1]$. Used strictly for rendering AR overlays, skeleton debug connections, and labels on the camera image without inverting the Y-axis.
+- **World Space:**  
+  3D metric coordinates $(x_{meter}, y_{meter}, z_{meter})$ from MediaPipe world landmarks preserved intact for anatomical Euclidean segment lengths, volumetric mesh generation, slicing, and future AR depth positioning.
+
+#### Standard AR Point Structure (`ARPoint`):
+```python
+@dataclass
+class ARPoint:
+    name: str              # Anatomical landmark name (e.g. 'LEFT_SHOULDER')
+    landmark_index: int    # MediaPipe joint index (0-32)
+    pixel_x: int           # Mapped horizontal raster coordinate
+    pixel_y: int           # Mapped vertical raster coordinate
+    world_x: float         # 3D metric coordinate (meters)
+    world_y: float         # 3D metric coordinate (meters)
+    world_z: float         # 3D metric coordinate (meters)
+    normalized_x: float    # Raw normalized coordinate [0, 1]
+    normalized_y: float    # Raw normalized coordinate [0, 1]
+    visibility: float      # Confidence score [0, 1]
+    valid: bool            # Visibility & boundary validity flag
+    short_label: str       # Short label (e.g. 'LS', 'RS', 'LE')
 ```
 
 ### Why Active Depth Sensing Will Enhance Accuracy

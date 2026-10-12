@@ -47,6 +47,8 @@ from stabilizer import MeasurementStabilizer
 from visualization import Visualizer
 from visualization_3d import Viewport3D
 from body_segmentation import BodySegmentation
+from ar_coordinate_mapper import ARCoordinateMapper
+from ar_measurement_overlay import ARMeasurementOverlay
 
 
 def print_banner() -> None:
@@ -63,6 +65,7 @@ def print_banner() -> None:
     print("  [P] Cycle Active Slicing Plane")
     print("  [M] Toggle 3D Volumetric Mesh View")
     print("  [S] Toggle Skeleton Layer")
+    print("  [O] Toggle AR Coordinate Mapping Overlay")
     print("  [R] Reset 3D Camera View")
     print("  [V] Enter Ground-Truth Validation Mode")
     print("  [+ / -] Zoom In / Out")
@@ -178,7 +181,7 @@ def main() -> None:
     segmenter = BodySegmentation()
 
     # 2. Camera Setup
-    camera_cfg = calibrator.camera_settings
+    camera_cfg = getattr(calibrator, "camera_settings", None) or {"width": 1280, "height": 720, "device_index": 0}
     camera_index = camera_cfg.get("device_index", 0)
     cap = cv2.VideoCapture(camera_index)
 
@@ -187,14 +190,26 @@ def main() -> None:
         print("Please check that your webcam is connected and accessible.")
         sys.exit(1)
 
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, camera_cfg.get("width", 1280))
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, camera_cfg.get("height", 720))
+    frame_w = camera_cfg.get("width", 1280)
+    frame_h = camera_cfg.get("height", 720)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_w)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_h)
+
+    # 3. Phase 6.1 & 6.2: AR Coordinate Mapper & Measurement Overlay Setup
+    ar_mapper = ARCoordinateMapper(
+        frame_width=frame_w,
+        frame_height=frame_h,
+        min_visibility=0.50,
+    )
+    ar_overlay = ARMeasurementOverlay(smoothing_alpha=0.35)
 
     window_name = "AI-HBS Automatic Measurement"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
     measurement_complete = False
     display_measurements = {}
+    final_lengths = {}
+    final_circs = {}
 
     try:
         while True:
@@ -217,6 +232,14 @@ def main() -> None:
                 landmarks = detector.get_landmarks(results)
                 world_landmarks = detector.get_world_landmarks(results)
 
+                # Phase 6.1: Map normalized & 3D world landmarks into 2D camera pixel coordinates
+                mapped_ar_points = ar_mapper.landmarks_to_pixels(
+                    landmarks=landmarks,
+                    world_landmarks=world_landmarks,
+                    frame_width=frame.shape[1],
+                    frame_height=frame.shape[0],
+                )
+
                 # Synchronize 3D volumetric engine, silhouette refinement, and slicing
                 viewport_3d.update(
                     raw_world_landmarks=world_landmarks,
@@ -229,15 +252,15 @@ def main() -> None:
                 # Check if all 12 key points are visible
                 is_fully_visible, _ = detector.check_full_body_visibility(landmarks, min_visibility=0.60)
 
+                # Calculate single-frame 3D segment lengths in cm
+                live_measurements = calculator.calculate_frame_measurements(
+                    world_landmarks,
+                    scale_factor=calibrator.scale_factor
+                )
+
                 if is_fully_visible and not measurement_complete:
                     status = "Stand still... Capturing measurements"
-
-                    # Calculate single-frame 3D segment lengths in cm
-                    frame_measurements = calculator.calculate_frame_measurements(
-                        world_landmarks,
-                        scale_factor=calibrator.scale_factor
-                    )
-                    stabilizer.add_frame_measurements(frame_measurements)
+                    stabilizer.add_frame_measurements(live_measurements)
 
                     # Check if required frames reached
                     if stabilizer.is_ready():
@@ -269,10 +292,66 @@ def main() -> None:
                 else:
                     status = "Full body not visible"
 
-                # Draw 2D skeleton connections on webcam feed
-                visualizer.draw_skeleton(frame, landmarks)
+                # Determine active measurements to render in AR overlay
+                if measurement_complete:
+                    active_linear = final_lengths
+                    active_circ = {
+                        "chest": {
+                            "value_cm": final_circs.get("chest_circumference_cm", 0.0),
+                            "confidence": final_circs.get("chest_confidence", 0.0),
+                            "stability_pct": viewport_3d.validator.get_stability_metrics("chest").get("stability_pct", 0.0),
+                        },
+                        "waist": {
+                            "value_cm": final_circs.get("waist_circumference_cm", 0.0),
+                            "confidence": final_circs.get("waist_confidence", 0.0),
+                            "stability_pct": viewport_3d.validator.get_stability_metrics("waist").get("stability_pct", 0.0),
+                        },
+                        "hip": {
+                            "value_cm": final_circs.get("hip_circumference_cm", 0.0),
+                            "confidence": final_circs.get("hip_confidence", 0.0),
+                            "stability_pct": viewport_3d.validator.get_stability_metrics("hip").get("stability_pct", 0.0),
+                        },
+                    }
+                else:
+                    active_linear = live_measurements
+                    c_val, c_conf, _ = viewport_3d.measurement_engine.get_smoothed_circumference("chest")
+                    w_val, w_conf, _ = viewport_3d.measurement_engine.get_smoothed_circumference("waist")
+                    h_val, h_conf, _ = viewport_3d.measurement_engine.get_smoothed_circumference("hip")
+                    active_circ = {
+                        "chest": {
+                            "value_cm": c_val,
+                            "confidence": c_conf,
+                            "stability_pct": viewport_3d.validator.get_stability_metrics("chest").get("stability_pct", 0.0),
+                        },
+                        "waist": {
+                            "value_cm": w_val,
+                            "confidence": w_conf,
+                            "stability_pct": viewport_3d.validator.get_stability_metrics("waist").get("stability_pct", 0.0),
+                        },
+                        "hip": {
+                            "value_cm": h_val,
+                            "confidence": h_conf,
+                            "stability_pct": viewport_3d.validator.get_stability_metrics("hip").get("stability_pct", 0.0),
+                        },
+                    }
+
+                # Phase 6.1 & 6.2: Draw AR Coordinate Mapping skeleton & AR measurements overlay
+                if ar_mapper.is_enabled:
+                    frame = ar_mapper.draw_debug_overlay(frame, mapped_ar_points)
+                    frame = ar_overlay.draw_all_measurements(
+                        frame=frame,
+                        mapped_points=mapped_ar_points,
+                        linear_measurements=active_linear,
+                        circumference_data=active_circ,
+                    )
+                elif visualizer.show_skeleton:
+                    visualizer.draw_skeleton(frame, landmarks)
+
             else:
                 viewport_3d.update(None)
+                if ar_mapper.is_enabled:
+                    frame = ar_mapper.draw_debug_overlay(frame, {})
+
 
             # Draw optional 2D segmentation mask overlay
             if segmenter.is_enabled:
@@ -319,6 +398,9 @@ def main() -> None:
                 skel_state_2d = visualizer.toggle_skeleton()
                 skel_state_3d = viewport_3d.toggle_skeleton()
                 print(f"[INFO] Skeleton Overlay: {'ENABLED' if skel_state_2d else 'DISABLED'}")
+            elif key == ord("o") or key == ord("O"):
+                ar_state = ar_mapper.toggle()
+                print(f"[INFO] AR Measurement & Coordinate Overlay: {'ENABLED' if ar_state else 'DISABLED'}")
             elif key == ord("r") or key == ord("R"):
                 viewport_3d.reset_view()
                 print("[INFO] 3D Camera view reset to defaults.")

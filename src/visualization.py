@@ -147,7 +147,7 @@ class Visualizer:
         mesh_status_col = (0, 255, 200) if is_3d_active else (160, 160, 160)
         cv2.putText(
             frame,
-            f"[{mesh_status_text}] [{skel_status_text}]  [B] Mask  [C] Circumf  [P] Plane  [M] 3D  [S] Skel  [V] Valid  [Q] Quit",
+            f"[{mesh_status_text}] [{skel_status_text}]  [B] Mask  [C] Circ  [P] Plane  [M] 3D  [S] Skel  [O] AR  [V] Valid  [Q] Quit",
             (25, 127),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.34,

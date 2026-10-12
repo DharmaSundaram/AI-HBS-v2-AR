@@ -23,6 +23,8 @@ AI-HBS-v2-AR/
 │   ├── measurements.py          # 3D body segment Euclidean distance calculations & correction factors
 │   ├── calibration.py           # Camera configuration & metric scale factor manager (meters to cm)
 │   ├── stabilizer.py            # Multi-frame measurement collector & median outlier rejection
+│   ├── ar_coordinate_mapper.py  # Phase 6.1: ARCoordinateMapper (Normalized -> 2D camera pixel mapping)
+│   ├── ar_measurement_overlay.py # Phase 6.2: ARMeasurementOverlay (AR dimension lines, CAD ticks & anchored labels)
 │   └── visualization.py         # 2D skeleton rendering, dynamic HUD, progress bar & results table
 ├── config/
 │   ├── calibration.json         # Camera configuration and scale factor settings
@@ -95,6 +97,7 @@ Double-click [`run.bat`](file:///e:/AI-HBS-v2-AR/run.bat) in File Explorer.
 | **`P`** | **Cycle Active Slicing Plane** (`ALL` → `CHEST` → `WAIST` → `HIP` → `LEFT_ARM` → `RIGHT_ARM` → `LEFT_THIGH` → `RIGHT_THIGH`) |
 | **`M`** | **Toggle 3D Volumetric Mesh** (expands into side-by-side dual-pane) |
 | **`S`** | **Toggle Skeleton Overlay** (2D webcam skeleton + 3D inner skeleton) |
+| **`O`** | **Toggle AR Measurement & Coordinate Overlay** (toggles CAD measurement lines, anchored metric badges & circumference indicators) |
 | **`R`** | **Reset 3D Camera View** (restores default orbit yaw, pitch, distance, and pan) |
 | **`V`** | **Enter Ground-Truth Validation Mode** (compares AI estimates against manual ground-truth) |
 | **`+` / `-`** | **Zoom In / Out** (adjusts virtual 3D camera distance) |
@@ -194,6 +197,37 @@ Generated when pressing **`V`** to run developer ground-truth validation:
     "disclaimer": "Ground-truth comparison for verification. Calibration factors were NOT automatically modified."
 }
 ```
+
+---
+
+## Phase 6.1: Real-Time AR Coordinate Mapping
+
+- **Status:** COMPLETED
+- **Description:** "The system now maps MediaPipe image-space landmarks to real-time camera pixel coordinates while preserving the existing metric 3D world-coordinate measurement pipeline. These mapped coordinates form the foundation for future AR measurement overlays."
+
+### Coordinate Spaces:
+- **Image Space:** 2D camera raster coordinates $(x_{pixel}, y_{pixel})$ clipped to $[0, W-1] \times [0, H-1]$ used directly for AR rendering, debug skeletons, and visual labels over the webcam frame.
+- **World Space:** 3D metric coordinates $(x_{meter}, y_{meter}, z_{meter})$ preserved intact for anatomical Euclidean segment lengths, volumetric mesh generation, slicing, and future AR depth positioning.
+
+### Visual Debug Mode & HUD:
+- **Joint Markers:** Displays circles at all valid 2D coordinates with short anatomical tags (`LS`, `RS`, `LE`, `RE`, `LW`, `RW`, `LH`, `RH`, `LK`, `RK`, `LA`, `RA`, `N`).
+- **Connected Skeleton:** Draws bone lines between valid joints using newly mapped 2D camera coordinates.
+- **Real-Time Debug HUD:** Live panel displaying status (`ACTIVE`), current frame resolution (`W x H`), valid landmarks ratio (`X / 12`), average confidence/visibility score, and pipeline confirmation (`NORMALIZED -> PIXEL`).
+- **Toggle Hotkey:** Press `[O]` to toggle AR coordinate mapping overlay on or off at runtime.
+
+---
+
+## Phase 6.2: Real-Time AR Measurement Lines & Labels
+
+- **Status:** COMPLETED
+- **Description:** "The system now renders body measurements directly on the live camera view using anatomically anchored AR measurement lines and labels. Segment measurements and circumference estimates are displayed using the existing stabilized measurement engine and mapped anatomical landmarks."
+
+### Features & Styling:
+- **CAD-Style Dimension Lines:** Thin amber dimension lines connecting joint pairs with perpendicular end-cap ticks (`├──────────────┤`).
+- **Anchored Glassmorphic Badges:** Compact labels positioned via outward perpendicular vectors relative to the torso center to avoid occluding the body.
+- **Visual Display Smoothing ($\alpha = 0.35$):** Lightweight temporal smoothing applied strictly to visual label positions, eliminating jitter while moving.
+- **Horizontal Circumference Indicators:** AR-style `<──────────────>` span indicators anchored at Chest, Waist, and Hip with real-time confidence indicators (`●`) and temporal stability percentages.
+- **Unified Hotkey `[O]`:** Press `[O]` to toggle the entire AR measurement and coordinate overlay layer.
 
 ---
 
